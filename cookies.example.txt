@@ -1,0 +1,1 @@
+sessionid=YOUR_SESSION_ID; csrftoken=YOUR_CSRF_TOKEN
