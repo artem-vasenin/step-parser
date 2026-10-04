@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,7 +21,7 @@ const (
 )
 
 type Config struct {
-	CourseID    int    `json:"course_id"`
+	CourseURL   string `json:"course_url"`
 	CookiesFile string `json:"cookies_file"`
 	Quality     string `json:"quality"`
 }
@@ -50,6 +51,7 @@ type SectionResponse struct {
 
 type Section struct {
 	ID       int    `json:"id"`
+	Course   int    `json:"course"`
 	Title    string `json:"title"`
 	Position int    `json:"position"`
 	Units    []int  `json:"units"`
@@ -61,6 +63,7 @@ type UnitResponse struct {
 
 type Unit struct {
 	ID       int `json:"id"`
+	Section  int `json:"section"`
 	Lesson   int `json:"lesson"`
 	Position int `json:"position"`
 }
@@ -273,6 +276,81 @@ func getStep(id int) (Step, error) {
 	return result.Steps[0], nil
 }
 
+// ---------- course URL ----------
+
+var coursePathRE = regexp.MustCompile(`^/course/(\d+)(?:/|$)`)
+var lessonPathRE = regexp.MustCompile(`^/lesson/(\d+)(?:/|$)`)
+
+func resolveCourseID(rawURL string) (int, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return 0, errors.New("course_url не может быть пустым")
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return 0, fmt.Errorf("некорректный course_url: %w", err)
+	}
+
+	host := strings.ToLower(u.Hostname())
+	if host != "stepik.org" && host != "www.stepik.org" {
+		return 0, fmt.Errorf("course_url должен вести на stepik.org, получен %q", u.Hostname())
+	}
+
+	if match := coursePathRE.FindStringSubmatch(u.Path); len(match) == 2 {
+		id, err := strconv.Atoi(match[1])
+		if err != nil || id <= 0 {
+			return 0, errors.New("не удалось определить ID курса из URL")
+		}
+		fmt.Printf("Course:  %d (из URL курса)\n", id)
+		return id, nil
+	}
+
+	if match := lessonPathRE.FindStringSubmatch(u.Path); len(match) == 2 {
+		lessonID, _ := strconv.Atoi(match[1])
+		unitText := u.Query().Get("unit")
+		if unitText == "" {
+			return 0, fmt.Errorf("ссылка на lesson %d не содержит параметр ?unit=...", lessonID)
+		}
+
+		unitID, err := strconv.Atoi(unitText)
+		if err != nil || unitID <= 0 {
+			return 0, fmt.Errorf("некорректный unit в course_url: %q", unitText)
+		}
+
+		fmt.Printf("Lesson:  %d\n", lessonID)
+		fmt.Printf("Unit:    %d\n", unitID)
+
+		unit, err := getUnit(unitID)
+		if err != nil {
+			return 0, fmt.Errorf("не удалось получить unit %d: %w", unitID, err)
+		}
+		if unit.Section <= 0 {
+			return 0, fmt.Errorf("API не вернул section для unit %d", unitID)
+		}
+		if unit.Lesson != 0 && lessonID != 0 && unit.Lesson != lessonID {
+			return 0, fmt.Errorf("unit %d относится к lesson %d, а в URL указан lesson %d", unitID, unit.Lesson, lessonID)
+		}
+
+		fmt.Printf("Section: %d\n", unit.Section)
+		section, err := getSection(unit.Section)
+		if err != nil {
+			return 0, fmt.Errorf("не удалось получить section %d: %w", unit.Section, err)
+		}
+
+		// Для разрешения URL нам нужен course из ответа /sections/{id}.
+		// getSection возвращает структуру, поэтому поле Course должно быть заполнено.
+		if section.Course <= 0 {
+			return 0, fmt.Errorf("API не вернул course для section %d", unit.Section)
+		}
+
+		fmt.Printf("Course:  %d\n", section.Course)
+		return section.Course, nil
+	}
+
+	return 0, errors.New("не удалось распознать ссылку Stepik: ожидается /course/<id>/... или /lesson/<id>/...?unit=<id>")
+}
+
 // ---------- video ----------
 
 func chooseVideoURL(video VideoInfo) (string, string, error) {
@@ -390,8 +468,9 @@ func loadConfig(path string) error {
 		return fmt.Errorf("некорректный JSON в %s: %w", path, err)
 	}
 
-	if config.CourseID <= 0 {
-		return errors.New("course_id должен быть положительным числом")
+	config.CourseURL = strings.TrimSpace(config.CourseURL)
+	if config.CourseURL == "" {
+		return errors.New("course_url не может быть пустым")
 	}
 	config.Quality = strings.TrimSpace(config.Quality)
 	if config.Quality == "" {
@@ -422,7 +501,7 @@ func main() {
 
 	fmt.Println("Stepik Offline Downloader")
 	fmt.Println("-------------------------")
-	fmt.Printf("Курс: %d\n", config.CourseID)
+	fmt.Printf("URL: %s\n", config.CourseURL)
 	fmt.Printf("Предпочтительное качество: %sp\n", config.Quality)
 	if cookieHeader != "" {
 		fmt.Println("Авторизация: cookie загружены")
@@ -436,9 +515,15 @@ func main() {
 		fatal(err)
 	}
 
+	fmt.Println("Определяю курс...")
+	courseID, err := resolveCourseID(config.CourseURL)
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Println()
 	fmt.Println("Получаю информацию о курсе...")
 
-	course, err := getCourse(config.CourseID)
+	course, err := getCourse(courseID)
 	if err != nil {
 		fatal(err)
 	}

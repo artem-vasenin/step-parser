@@ -1,22 +1,28 @@
 # Stepik Offline Downloader
 
-Программа скачивает видео из курса Stepik в `~/Downloads/<название курса>`.
+Программа скачивает доступные вашему аккаунту видео из курса Stepik в `~/Downloads/<название курса>`.
 
 ## Настройка
 
 1. Скопируйте `config.example.json` в `config.json`.
-2. Укажите ID купленного курса в `course_id`.
-3. Экспортируйте cookie из браузера в файл одной строкой HTTP-заголовка:
-
-   ```text
-   sessionid=...; csrftoken=...; other_cookie=...
-   ```
-
-4. Укажите путь к этому файлу в `cookies_file`.
+2. В `course_url` вставьте обычную ссылку Stepik. Поддерживаются:
+   - `https://stepik.org/course/289926/syllabus`
+   - `https://stepik.org/lesson/1370048/step/1?unit=1386238`
+3. Для курса, требующего авторизации, сохраните cookie из своей браузерной сессии в `cookies.txt` одной строкой HTTP-заголовка. Не публикуйте этот файл и не добавляйте его в Git.
+4. Укажите желаемое качество в `quality`, например `1080`.
 5. Запустите:
 
    ```sh
-   go run stepik-download.go
+   go run main.go
    ```
 
-Для бесплатного курса `cookies_file` можно оставить пустым. Cookie дают доступ к аккаунту — не публикуйте `cookies.txt`, не добавляйте его в Git и не передавайте другим людям.
+   или соберите бинарник:
+
+   ```sh
+   go build -o stepik-download main.go
+   ./stepik-download
+   ```
+
+Для публичного курса `cookies_file` можно оставить пустым (`""`).
+
+Если `course_url` ведёт прямо на курс, ID берётся из URL. Если это ссылка на урок с параметром `unit`, программа автоматически проходит цепочку `unit → section → course` через Stepik API.
