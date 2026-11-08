@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,6 +91,7 @@ type Step struct {
 
 type StepBlock struct {
 	Name  string     `json:"name"`
+	Text  string     `json:"text"`
 	Video *VideoInfo `json:"video"`
 }
 
@@ -500,48 +502,51 @@ func main() {
 	}
 
 	fmt.Println("Stepik Offline Downloader")
-	fmt.Println("-------------------------")
-	fmt.Printf("URL: %s\n", config.CourseURL)
-	fmt.Printf("Предпочтительное качество: %sp\n", config.Quality)
+	fmt.Println("1. Видео (MP4)")
+	fmt.Println("2. Текстовый курс (HTML + PDF)")
+	fmt.Print("Выберите режим [1/2]: ")
+	var mode string
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		fatal(errors.New("не выбран режим"))
+	}
+	mode = strings.TrimSpace(scanner.Text())
+	if mode != "1" && mode != "2" {
+		fatal(fmt.Errorf("неизвестный режим %q", mode))
+	}
+
 	if cookieHeader != "" {
-		fmt.Println("Авторизация: cookie загружены")
+		fmt.Println("Авторизация: cookies загружены")
 	} else {
-		fmt.Println("Авторизация: без cookie")
+		fmt.Println("Авторизация: без cookies")
 	}
-	fmt.Println()
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fatal(err)
-	}
-
-	fmt.Println("Определяю курс...")
 	courseID, err := resolveCourseID(config.CourseURL)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Println()
-	fmt.Println("Получаю информацию о курсе...")
-
 	course, err := getCourse(courseID)
 	if err != nil {
 		fatal(err)
 	}
-
-	root := filepath.Join(
-		home,
-		"Downloads",
-		safeName(course.Title),
-	)
-
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fatal(err)
+	}
+	root := filepath.Join(home, "Downloads", safeName(course.Title))
 	if err := os.MkdirAll(root, 0755); err != nil {
 		fatal(err)
 	}
+	fmt.Printf("Курс: %s\nПапка: %s\n", course.Title, root)
+	if mode == "1" {
+		runVideo(course, root)
+		return
+	}
+	if err := runText(course, root); err != nil {
+		fatal(err)
+	}
+}
 
-	fmt.Printf("Курс: %s\n", course.Title)
-	fmt.Printf("Секций: %d\n", len(course.Sections))
-	fmt.Printf("Папка: %s\n\n", root)
-
+func runVideo(course Course, root string) {
 	totalVideos := 0
 	totalDuration := 0
 	failed := 0
@@ -626,6 +631,7 @@ func main() {
 						stepID,
 						err,
 					)
+					failed++
 					continue
 				}
 
