@@ -365,11 +365,15 @@ func printPDF(htmlFile, pdfFile string) error {
 	if runtime.GOOS == "windows" {
 		uri = "file:///" + strings.ReplaceAll(filepath.ToSlash(absHTML), " ", "%20")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, browser, "--headless", "--disable-gpu", "--no-pdf-header-footer", "--allow-file-access-from-files", "--print-to-pdf="+absPDF, uri)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("время генерации PDF истекло: %w", ctx.Err())
+		}
+
 		return fmt.Errorf("Chrome: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	stat, err := os.Stat(absPDF)
